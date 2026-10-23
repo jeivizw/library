@@ -1,30 +1,57 @@
 import { useState } from 'react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { supabase } from './supabase';
 
 function App() {
   const [photoUrl, setPhotoUrl] = useState(null);
   const [nome, setNome] = useState('João Silva');
   const [matricula, setMatricula] = useState('123456789');
   const [curso, setCurso] = useState('Engenharia Informática');
+  const [loading, setLoading] = useState(false);
 
   const handleCapture = async () => {
     try {
+      setLoading(true);
+      
+      // 1. Captura da imagem local
       const image = await Camera.getPhoto({
         quality: 90,
         allowEditing: false,
         resultType: CameraResultType.Uri,
         source: CameraSource.Prompt
       });
-      setPhotoUrl(image.webPath);
+
+      // 2. Conversão da URI para Blob (formato aceito pelo Supabase)
+      const response = await fetch(image.webPath);
+      const blob = await response.blob();
+      const fileName = `${matricula}-${Date.now()}.jpeg`;
+
+      // 3. Upload para o bucket 'user-photos'
+      const { error: uploadError } = await supabase.storage
+        .from('user-photos')
+        .upload(fileName, blob, { contentType: 'image/jpeg' });
+
+      if (uploadError) throw uploadError;
+
+      // 4. Resgate da URL pública
+      const { data } = supabase.storage
+        .from('user-photos')
+        .getPublicUrl(fileName);
+
+      // 5. Renderização da URL na interface
+      setPhotoUrl(data.publicUrl);
+      alert('Foto salva na nuvem com sucesso!');
+
     } catch (error) {
-      console.error('Promise rejeitada:', error);
-      alert('Ação cancelada. O aplicativo continua a funcionar.');
+      console.error('Erro na operação:', error);
+      alert('Ação cancelada ou erro no upload. O aplicativo continua a funcionar.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-8 flex flex-col md:flex-row gap-8 items-center justify-center font-sans">
-      
       {/* Lado Esquerdo: Formulário */}
       <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">Gerar Carteirinha</h2>
@@ -60,9 +87,10 @@ function App() {
           
           <button 
             onClick={handleCapture}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 font-semibold mt-4"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 font-semibold mt-4 disabled:opacity-50"
           >
-            Tirar Foto / Galeria
+            {loading ? 'Enviando para a nuvem...' : 'Tirar Foto / Galeria'}
           </button>
         </div>
       </div>
@@ -99,7 +127,6 @@ function App() {
           <p className="text-[10px] text-gray-500 uppercase tracking-widest">Digitalização Obrigatória</p>
         </div>
       </div>
-
     </div>
   );
 }
